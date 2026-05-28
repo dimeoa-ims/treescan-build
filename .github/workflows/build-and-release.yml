@@ -1,0 +1,149 @@
+name: Build and Release TreeScan
+
+# Run this workflow on any branch calculation/TreeScan.h changes
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or commit to build"
+        required: true
+
+jobs:
+  # Shared Setup info
+  setup:
+    runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+
+    steps:
+      # Pull specified repo
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      # Parse Version
+      - name: Extract version
+        id: version
+        run: |
+          MAJOR=$(awk -F'"' '/VERSION_MAJOR/ {print $2}' calculation/TreeScan.h)
+          MINOR=$(awk -F'"' '/VERSION_MINOR/ {print $2}' calculation/TreeScan.h)
+          PATCH=$(awk -F'"' '/VERSION_RELEASE/ {print $2}' calculation/TreeScan.h)
+          VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: setup
+
+    steps:
+      # Pull specified repo
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      # Build the builder image
+      - name: Build Docker image
+        run: docker build -t treescan-builder .
+
+      # Build treescan with local image
+      - name: Build binaries
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            treescan-builder
+      # We don't print stdout or stderr, so check that binaries were actually created
+      - name: Verify binaries
+        run: |
+          ls -lah build/binaries/linux
+          test -f build/binaries/linux/treescan64
+      # Upload artifacts to be packaged
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            build/binaries/linux/treescan64
+            build/binaries/linux/libtreescan64.so
+          
+  build-macos:
+    runs-on: macos-latest
+    needs: setup
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Install boost dependency
+      - name: Install dependencies
+        run: |
+          # Download and unpack boost to home since we can specify the path
+          curl -L https://archives.boost.io/release/1.90.0/source/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p $HOME/boost
+          tar -xzf boost.tar.gz -C $HOME/boost --strip-components=1
+          
+          # Download and inject java into /Library/Java/JavaVirtualMachines
+          curl -L https://api.adoptium.net/v3/binary/latest/17/ga/mac/x64/jdk/hotspot/normal/eclipse -o jdk.tar.gz
+          sudo mkdir -p /Library/Java/JavaVirtualMachines/temurin-17.jdk
+          sudo tar -xzf jdk.tar.gz -C /Library/Java/JavaVirtualMachines/temurin-17.jdk --strip-components=1
+          echo "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home" >> $GITHUB_ENV
+          echo "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin" >> $GITHUB_PATH
+      # Build binaries
+      - name: Build mac binaries
+        run: |
+          mkdir -p build/binaries/mac
+          chmod +x scripts/mac
+          cd scripts/mac
+          ./build_binaries \
+            "$GITHUB_WORKSPACE" \
+            "$HOME/boost" \
+            "$GITHUB_WORKSPACE/build/binaries/mac"
+      # Check that binaries were actual created
+      - name: Verify output
+        run: |
+          ls -lah build/binaries/mac
+          test -f build/binaries/mac/treescan
+      
+      # Upload artifacts to be packaged
+      - name: Upload MacOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |    
+            build/binaries/mac/treescan
+            build/binaries/mac/libtreescan.jnilib
+  release:
+    runs-on: ubuntu-latest
+    needs: [setup, build-linux, build-macos]
+
+    # environment:
+    #   name: release
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.setup.outputs.version }}
+          name: TreeScan ${{ needs.setup.outputs.version }}
+          files: |
+            treescan64
+            libtreescan64.so
+            treescan
+            libtreescan.jnilib
