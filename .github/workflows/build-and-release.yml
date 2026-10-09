@@ -161,7 +161,9 @@ jobs:
           New-Item -ItemType Junction -Path jdk -Target $env:JAVA_HOME
 
       - name: Build windows binaries
-        run: msbuild treescan.sln /m /p:Configuration=Release /p:Platform=x64
+        run: |
+          msbuild zlib/zlib-1.3.1/zlib.vcxproj /m /p:Configuration=Release /p:Platform=x64
+          msbuild treescan.sln /m /p:Configuration=Release /p:Platform=x64
 
       # Copy into one directory so the artifact is flat
       - name: Verify output

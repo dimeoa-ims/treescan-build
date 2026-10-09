@@ -1,4 +1,4 @@
-FROM rockylinux:8
+FROM quay.io/rockylinux/rockylinux:8
 
 # Necessary libraries
 RUN    dnf -y install dnf-plugins-core \
