@@ -5,6 +5,7 @@ RUN    dnf -y install dnf-plugins-core \
     && dnf config-manager --set-enabled powertools \
     && dnf -y install \
          gcc-toolset-11 \
+         rpm-build \
          make \
          libstdc++ \
          tar \

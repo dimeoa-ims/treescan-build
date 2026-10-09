@@ -9,12 +9,12 @@
 # - icon still wrong
 # - probably other things when looking closer
 
-javajdk="/prj/treescan/build/packages/java/jdk-25.0.2+10_linux_x64"
+javajdk="${5:-/prj/treescan/build/packages/java/jdk-25.0.2+10_linux_x64}"
 version=$1
-srcdir="/prj/treescan/build/treescan"
-bundleinputdir="/prj/treescan/build/jpackage/treescanbundlesrc"
-bundledir="/prj/treescan/build/jpackage"
-binaries="/prj/treescan/build/binaries/linux"
+srcdir="${3:-/prj/treescan/build/treescan}"
+bundledir="${6:-/prj/treescan/build/jpackage}"
+bundleinputdir="$bundledir/treescanbundlesrc"
+binaries="${4:-/prj/treescan/build/binaries/linux}"
 
 rm -rf $bundleinputdir
 rm -rf $bundledir/TreeScanStatistic

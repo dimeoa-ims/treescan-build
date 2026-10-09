@@ -66,7 +66,23 @@ jobs:
           path: |
             build/binaries/linux/treescan64
             build/binaries/linux/libtreescan64.so
-          
+
+      # Build the GUI jar and package it with the linux binaries into an rpm
+      - name: Build rpm
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -e VERSION=${{ needs.setup.outputs.version }} \
+            treescan-builder /workspace/scripts/linux/build_rpm.sh
+          ls -lah build/rpm
+          test -n "$(ls build/rpm/*.rpm)"
+
+      - name: Upload rpm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: build/rpm/*.rpm
+
   build-macos:
     runs-on: macos-latest
     needs: setup
@@ -74,6 +90,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
 
       # Install boost dependency
       - name: Install dependencies
@@ -84,11 +102,11 @@ jobs:
           tar -xzf boost.tar.gz -C $HOME/boost --strip-components=1
           
           # Download and inject java into /Library/Java/JavaVirtualMachines
-          curl -L https://api.adoptium.net/v3/binary/latest/17/ga/mac/x64/jdk/hotspot/normal/eclipse -o jdk.tar.gz
-          sudo mkdir -p /Library/Java/JavaVirtualMachines/temurin-17.jdk
-          sudo tar -xzf jdk.tar.gz -C /Library/Java/JavaVirtualMachines/temurin-17.jdk --strip-components=1
-          echo "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home" >> $GITHUB_ENV
-          echo "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin" >> $GITHUB_PATH
+          curl -L https://api.adoptium.net/v3/binary/latest/25/ga/mac/x64/jdk/hotspot/normal/eclipse -o jdk.tar.gz
+          sudo mkdir -p /Library/Java/JavaVirtualMachines/temurin-25.jdk
+          sudo tar -xzf jdk.tar.gz -C /Library/Java/JavaVirtualMachines/temurin-25.jdk --strip-components=1
+          echo "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home" >> $GITHUB_ENV
+          echo "/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home/bin" >> $GITHUB_PATH
       # Build binaries
       - name: Build mac binaries
         run: |
@@ -113,9 +131,57 @@ jobs:
           path: |    
             build/binaries/mac/treescan
             build/binaries/mac/libtreescan.jnilib
+
+  build-windows:
+    runs-on: windows-2022
+    needs: setup
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Install java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Install msbuild
+        uses: microsoft/setup-msbuild@v2
+
+      # The vcxproj files expect boost and the jdk headers under the repo root
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          curl.exe -L https://archives.boost.io/release/1.90.0/source/boost_1_90_0.zip -o boost.zip
+          New-Item -ItemType Directory boost | Out-Null
+          tar -xf boost.zip -C boost
+          New-Item -ItemType Junction -Path jdk -Target $env:JAVA_HOME
+
+      - name: Build windows binaries
+        run: msbuild treescan.sln /m /p:Configuration=Release /p:Platform=x64
+
+      # Copy into one directory so the artifact is flat
+      - name: Verify output
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory build/binaries/windows -Force | Out-Null
+          Copy-Item batch_application/x64/Release/treescan64.exe, library/x64/Release/treescan64.dll build/binaries/windows -ErrorAction Stop
+          Get-ChildItem build/binaries/windows
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            build/binaries/windows/treescan64.exe
+            build/binaries/windows/treescan64.dll
+
   release:
     runs-on: ubuntu-latest
-    needs: [setup, build-linux, build-macos]
+    needs: [setup, build-linux, build-macos, build-windows]
 
     # environment:
     #   name: release
@@ -137,6 +203,16 @@ jobs:
         with:
           name: macos
 
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows
+
+      - name: Download rpm artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rpm
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -147,3 +223,6 @@ jobs:
             libtreescan64.so
             treescan
             libtreescan.jnilib
+            treescan64.exe
+            treescan64.dll
+            *.rpm
